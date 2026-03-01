@@ -1,0 +1,17 @@
+[package]
+name = "gui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+docker-api = { version = "0.14", features = ["swarm"] }
+gpui = { version = "0.2.2" }
+gpui-component = "0.5.1"
+gpui-component-assets = "0.5.1"
+core-text = "=21.0.0"
+unicode-segmentation = "1.12.0"
+anyhow = "1.0.102"
+fake = { version = "4.4.0", features = ["derive"] }
+rand = "0.9"
+docker-compose-types = "0.22.0"
+serde_yaml = "0.9.33"
