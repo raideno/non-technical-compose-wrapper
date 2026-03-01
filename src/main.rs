@@ -4,7 +4,7 @@ use gpui_component::{ActiveTheme, Root};
 
 use docker_compose_types::Compose;
 use screens::entry::EntryScreen;
-use screens::router::NavigationEvent;
+use screens::router::{NavigationEvent, NavigationPayload};
 use screens::services::ServicesScreen;
 
 mod components;
@@ -17,17 +17,32 @@ enum Screen {
 
 struct NavigatorView {
     screen: Screen,
-    services: Vec<String>,
 }
 
 impl NavigatorView {
-    fn new(services: Vec<String>, context: &mut Context<Self>) -> Self {
+    fn new(context: &mut Context<Self>) -> Self {
         let entry = context.new(|_| EntryScreen::new("docker-compose.yaml".to_string()));
 
         context
             .subscribe(&entry, |this, _entity, event: &NavigationEvent, cx| {
-                println!("From {}", event.from);
-                let services_screen = cx.new(|_| ServicesScreen::new(this.services.clone()));
+                let services = match &event.payload {
+                    NavigationPayload::OpenFile(path) => match std::fs::read_to_string(path) {
+                        Ok(yaml) => match serde_yaml::from_str::<Compose>(&yaml) {
+                            Ok(compose) => compose.services.0.keys().cloned().collect(),
+                            Err(err) => {
+                                eprintln!("Failed to parse docker-compose file: {err}");
+                                vec![]
+                            }
+                        },
+                        Err(err) => {
+                            eprintln!("Failed to read file at {:?}: {err}", path);
+                            vec![]
+                        }
+                    },
+                    NavigationPayload::None => vec![],
+                };
+
+                let services_screen = cx.new(|_| ServicesScreen::new(services));
                 this.screen = Screen::Services(services_screen);
                 cx.notify();
             })
@@ -35,7 +50,6 @@ impl NavigatorView {
 
         Self {
             screen: Screen::Entry(entry),
-            services,
         }
     }
 }
@@ -58,29 +72,10 @@ impl Render for NavigatorView {
 }
 
 fn main() {
-    // /* TODO: later should be provided at startup, with a default value, etc */
-    // let yaml = std::fs::read_to_string("docker-compose.yaml").unwrap();
-    // let compose: Compose = serde_yaml::from_str(&yaml).unwrap();
-
-    // let services: Vec<String> = compose.services.0.keys().cloned().collect();
-
-    // println!("Services:");
-    // for name in &services {
-    //     println!("  - {name}");
-    // }
-
     let application = Application::new().with_assets(gpui_component_assets::Assets);
 
     application.run(move |cx| {
         gpui_component::init(cx);
-
-        // let services = services.clone();
-        let services = vec![
-            "web".to_string(),
-            "db".to_string(),
-            "cache".to_string(),
-            "worker".to_string(),
-        ];
 
         cx.spawn(async move |cx| {
             cx.open_window(
@@ -92,7 +87,7 @@ fn main() {
                     ..Default::default()
                 },
                 move |window, cx| {
-                    let navigator = cx.new(|cx| NavigatorView::new(services, cx));
+                    let navigator = cx.new(|cx| NavigatorView::new(cx));
                     cx.new(|cx| Root::new(navigator, window, cx))
                 },
             )?;

@@ -5,7 +5,7 @@ use gpui_component::button::Button;
 use gpui_component::v_flex;
 
 use crate::components::file_picker::FilePicker;
-use crate::screens::router::NavigationEvent;
+use crate::screens::router::{NavigationEvent, NavigationPayload, Route};
 
 pub struct EntryScreen {
     default_path: String,
@@ -17,7 +17,7 @@ impl EventEmitter<NavigationEvent> for EntryScreen {}
 impl EntryScreen {
     pub fn new(default_path: String) -> Self {
         Self {
-            default_path: default_path,
+            default_path,
             file_picker: None,
         }
     }
@@ -31,7 +31,8 @@ impl Render for EntryScreen {
 
         let file_picker = self.file_picker.as_ref().unwrap();
 
-        let has_file = file_picker.read(cx).selected_path().is_some();
+        let selected_path = file_picker.read(cx).selected_path().cloned();
+        let has_file = selected_path.is_some();
 
         v_flex()
             .justify_center()
@@ -52,10 +53,13 @@ impl Render for EntryScreen {
                         .when(!has_file, |b| b.disabled(true))
                         .when(!has_file, |b| b.cursor(CursorStyle::OperationNotAllowed))
                         .when(has_file, |b| b.cursor(CursorStyle::PointingHand))
-                        .on_click(cx.listener(|this, _, _window, cx| {
-                            cx.emit(NavigationEvent {
-                                from: "entry".to_string(),
-                            });
+                        .on_click(cx.listener(move |_this, _, _window, cx| {
+                            if let Some(path) = selected_path.clone() {
+                                cx.emit(NavigationEvent {
+                                    from: Route::Entry,
+                                    payload: NavigationPayload::OpenFile(path),
+                                });
+                            }
                         })),
                 ),
             )
