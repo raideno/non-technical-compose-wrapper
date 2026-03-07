@@ -1,11 +1,11 @@
 use gpui::*;
+use gpui_component::button::Button;
+use gpui_component::input::InputState;
 use gpui_component::tab::{Tab, TabBar};
-use gpui_component::{
-    ActiveTheme,
-    button::{Toggle, ToggleVariants},
-    h_flex, v_flex,
-};
+use gpui_component::{h_flex, v_flex};
 
+use crate::components::auto_form::{AutoForm, Field, FormEvent, FormValues};
+use crate::components::page_header::PageHeader;
 use crate::components::service_card::{ServiceCard, ServiceStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +19,10 @@ pub struct ServicesScreen {
     services: Vec<String>,
     toggle_on: bool,
     active_tab: ActiveTab,
+    // Settings — initialized lazily on first render of the settings tab
+    settings_form: Option<Entity<AutoForm>>,
+    form_values: Option<FormValues>,
+    _form_subscription: Option<Subscription>,
 }
 
 impl ServicesScreen {
@@ -27,14 +31,62 @@ impl ServicesScreen {
             services,
             toggle_on: false,
             active_tab: ActiveTab::Home,
+            settings_form: None,
+            form_values: None,
+            _form_subscription: None,
         }
+    }
+
+    fn ensure_settings_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings_form.is_some() {
+            return;
+        }
+
+        let host = cx.new(|cx| InputState::new(window, cx));
+        let port = cx.new(|cx| InputState::new(window, cx));
+
+        let form = cx.new(|cx| {
+            AutoForm::new(
+                vec![
+                    Field::text("Host", host)
+                        .description("The hostname or IP address of the Docker daemon."),
+                    Field::text("Port", port)
+                        .description("The port the Docker daemon is listening on."),
+                    Field::switch("Dark Mode", false)
+                        .description("Toggle the dark color theme."),
+                    Field::switch("Notifications", true)
+                        .description("Receive alerts when a service changes state."),
+                ],
+                cx,
+            )
+        });
+
+        let sub = cx.subscribe(&form, |this, _, event: &FormEvent, cx| {
+            if let FormEvent::Change(values) = event {
+                this.form_values = Some(values.clone());
+                println!("[settings] host={:?} port={:?} dark_mode={:?} notifications={:?}",
+                    this.form_values.as_ref().and_then(|v| v.text("Host")),
+                    this.form_values.as_ref().and_then(|v| v.text("Port")),
+                    this.form_values.as_ref().and_then(|v| v.switch("Dark Mode")),
+                    this.form_values.as_ref().and_then(|v| v.switch("Notifications")),
+                );
+                cx.notify();
+            }
+        });
+
+        self.settings_form = Some(form);
+        self._form_subscription = Some(sub);
     }
 }
 
 impl Render for ServicesScreen {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let toggle_on = self.toggle_on;
         let active_tab = self.active_tab;
+
+        if active_tab == ActiveTab::Settings {
+            self.ensure_settings_form(window, cx);
+        }
 
         let selected_index = match active_tab {
             ActiveTab::Home => 0,
@@ -45,7 +97,7 @@ impl Render for ServicesScreen {
         let tab_content: AnyElement = match active_tab {
             ActiveTab::Home => self.render_home(cx).into_any_element(),
             ActiveTab::Settings => self.render_settings(cx).into_any_element(),
-            ActiveTab::Assistance => self.render_assistance(cx).into_any_element(),
+            ActiveTab::Assistance => self.render_assistance().into_any_element(),
         };
 
         v_flex()
@@ -93,17 +145,17 @@ impl Render for ServicesScreen {
                     .items_center()
                     .px_4()
                     .child(
-                        Toggle::new("footer-toggle")
+                        Button::new("footer-toggle")
                             .label(if toggle_on { "ON" } else { "OFF" })
-                            .checked(toggle_on)
                             .outline()
                             .w_full()
-                            .on_click(cx.listener(move |this, new_state, _window, _cx| {
-                                this.toggle_on = *new_state;
+                            .on_click(cx.listener(|this, _, _window, cx| {
+                                this.toggle_on = !this.toggle_on;
                                 println!(
                                     "Toggle button clicked — state is now: {}",
                                     if this.toggle_on { "ON" } else { "OFF" }
                                 );
+                                cx.notify();
                             })),
                     ),
             )
@@ -111,91 +163,67 @@ impl Render for ServicesScreen {
 }
 
 impl ServicesScreen {
-    fn render_home(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_home(&self, _cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .flex_1()
             .gap_8()
             .py_8()
+            .child(PageHeader::new(
+                "Services".to_string(),
+                "Manage and monitor your running services".to_string(),
+            ))
             .child(
-                v_flex()
+                h_flex()
                     .px_8()
-                    .child(
-                        div()
-                            .text_2xl()
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(cx.theme().foreground)
-                            .child("Services"),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Manage and monitor your running containers."),
+                    .w_full()
+                    .flex_wrap()
+                    .gap_3()
+                    .children(
+                        self.services
+                            .iter()
+                            .enumerate()
+                            .map(|(i, name)| {
+                                let status = if i % 2 == 0 {
+                                    ServiceStatus::Running
+                                } else {
+                                    ServiceStatus::Stopped
+                                };
+                                ServiceCard::new(
+                                    name.clone(),
+                                    format!("Manages the {} container", name),
+                                    status,
+                                )
+                                .into_any_element()
+                            })
+                            .collect::<Vec<AnyElement>>(),
                     ),
             )
-            .child(
-                h_flex().px_8().w_full().flex_wrap().gap_3().children(
-                    self.services
-                        .iter()
-                        .enumerate()
-                        .map(|(i, name)| {
-                            let status = if i % 2 == 0 {
-                                ServiceStatus::Running
-                            } else {
-                                ServiceStatus::Stopped
-                            };
+    }
 
-                            ServiceCard::new(
-                                name.clone(),
-                                format!("Manages the {} container", name),
-                                status,
-                            )
-                            .into_any_element()
-                        })
-                        .collect::<Vec<gpui::AnyElement>>(),
-                ),
+    fn render_settings(&self, _cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .flex_1()
+            .gap_8()
+            .py_8()
+            .child(PageHeader::new(
+                "Settings".to_string(),
+                "Configure your application preferences here.".to_string(),
+            ))
+            .child(
+                div()
+                    .px_8()
+                    .child(self.settings_form.clone().unwrap())
             )
     }
 
-    fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_assistance(&self) -> impl IntoElement {
         v_flex()
             .flex_1()
-            .size_full()
+            .gap_8()
             .py_8()
-            .px_8()
-            .child(
-                div()
-                    .text_2xl()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(cx.theme().foreground)
-                    .child("Settings"),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Configure your application preferences here."),
-            )
-    }
-
-    fn render_assistance(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .flex_1()
-            .size_full()
-            .py_8()
-            .px_8()
-            .child(
-                div()
-                    .text_2xl()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(cx.theme().foreground)
-                    .child("Assistance"),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Find help, documentation, and support resources."),
-            )
+            .child(PageHeader::new(
+                "Assistance".to_string(),
+                "Find help, documentation and assistance.".to_string(),
+            ))
     }
 }

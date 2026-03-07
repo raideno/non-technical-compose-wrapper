@@ -9,6 +9,7 @@ use screens::services::ServicesScreen;
 
 mod components;
 mod screens;
+mod configurations;
 
 enum Screen {
     Entry(Entity<EntryScreen>),
@@ -73,6 +74,10 @@ impl Render for NavigatorView {
 
 fn main() {
     let application = Application::new().with_assets(gpui_component_assets::Assets);
+
+    let configuration = configurations::load("configuration.json".to_string()).unwrap();
+
+    println!("[configuration]: {}", configuration.assistance.enabled);
 
     application.run(move |cx| {
         gpui_component::init(cx);
